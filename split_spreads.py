@@ -53,90 +53,43 @@ def iter_pdf_files(path_str: str):
     else:
         print(f"Warning: '{path_str}' is neither a PDF file nor a directory containing PDFs.", file=sys.stderr)
 
-def split_page_vertically(page, ratio=0.5, gutter=0.0, offset=0.0):
+def split_page(page, ratio=0.5, gutter=0.0, offset=0.0, vertical=True):
     """
     Return two page copies (left, right) cropped from the original by a vertical split.
     ratio: position of split as fraction of width (0..1). 0.5 = middle.
     gutter: extra gap (points) removed/added around the split (split pushes crops away by half gutter).
     offset: shift split line horizontally (points), positive => shift right.
     """
+
     width = float(page.mediabox.width)
     height = float(page.mediabox.height)
 
-    split_x = width * ratio + offset
-    # Apply half-gutter on each side of the split
-    left_right_pad = gutter / 2.0
+    split = (width if vertical else height) * ratio + offset
+    pad = gutter / 2.0
 
-    # Left half box
-    left_llx = 0
-    left_lly = 0
-    left_urx = max(0.0, min(width, split_x - left_right_pad))
-    left_ury = height
+    # First half
+    first_llx = 0
+    first_lly = 0
+    first_urx = max(0.0, min(width, split - pad)) if vertical else width
+    first_ury = height if vertical else max(0.0, min(height, split - pad))
 
-    # Right half box
-    right_llx = min(width, max(0.0, split_x + left_right_pad))
-    right_lly = 0
-    right_urx = width
-    right_ury = height
+    # second half
+    second_llx = min(width, max(0.0, split + pad)) if vertical else 0
+    second_lly = 0 if vertical else min(height, max(0.0, split + pad))
+    second_urx = width
+    second_ury = height
 
-    left = copy.deepcopy(page)
-    right = copy.deepcopy(page)
+    first = copy.deepcopy(page)
+    second = copy.deepcopy(page)
 
     # Use /CropBox to define visible area (do not change Mediabox to retain page size semantics if desired)
-    left.cropbox.lower_left = (left_llx, left_lly)
-    left.cropbox.upper_right = (left_urx, left_ury)
+    first.cropbox.lower_left = (first_llx, first_lly)
+    first.cropbox.upper_right = (first_urx, first_ury)
 
-    right.cropbox.lower_left = (right_llx, right_lly)
-    right.cropbox.upper_right = (right_urx, right_ury)
+    second.cropbox.lower_left = (second_llx, second_lly)
+    second.cropbox.upper_right = (second_urx, second_ury)
 
-    # Normalize rotation to avoid weird viewing behaviors
-    try:
-        if getattr(left, "rotation", 0) not in (0, None):
-            left.rotate(0)  # pypdf keeps rotation as property; rotate(0) is a no-op in latest versions
-        if getattr(right, "rotation", 0) not in (0, None):
-            right.rotate(0)
-    except Exception:
-        pass
-
-    return left, right
-
-def split_page_horizontally(page, ratio=0.5, gutter=0.0, offset=0.0):
-    width = float(page.mediabox.width)
-    height = float(page.mediabox.height)
-
-    split_y = height * ratio + offset
-    top_bottom_pad = gutter / 2.0
-
-    # Bottom half
-    bottom_llx = 0
-    bottom_lly = 0
-    bottom_urx = width
-    bottom_ury = max(0.0, min(height, split_y - top_bottom_pad))
-
-    # Top half
-    top_llx = 0
-    top_lly = min(height, max(0.0, split_y + top_bottom_pad))
-    top_urx = width
-    top_ury = height
-
-    bottom = copy.deepcopy(page)
-    top = copy.deepcopy(page)
-
-    bottom.cropbox.lower_left = (bottom_llx, bottom_lly)
-    bottom.cropbox.upper_right = (bottom_urx, bottom_ury)
-
-    top.cropbox.lower_left = (top_llx, top_lly)
-    top.cropbox.upper_right = (top_urx, top_ury)
-
-    try:
-        if getattr(bottom, "rotation", 0) not in (0, None):
-            bottom.rotate(0)
-        if getattr(top, "rotation", 0) not in (0, None):
-            top.rotate(0)
-    except Exception:
-        pass
-
-    return bottom, top
+    return first, second
 
 def process_file(in_path: Path, out_dir: Path, orientation: str, ratio: float, gutter: float, offset: float, suffix: str):
     reader = PdfReader(str(in_path))
@@ -148,10 +101,7 @@ def process_file(in_path: Path, out_dir: Path, orientation: str, ratio: float, g
 
     for idx, page in enumerate(reader.pages, start=1):
         # Create two new pages from each original
-        if orientation == "vertical":
-            p1, p2 = split_page_vertically(page, ratio=ratio, gutter=gutter, offset=offset)
-        else:
-            p1, p2 = split_page_horizontally(page, ratio=ratio, gutter=gutter, offset=offset)
+        p1, p2 = split_page(page, ratio=ratio, gutter=gutter, offset=offset, vertical=orientation == "vertical")
 
         # Optionally, shrink resulting pages' MediaBox to the crop box, so each new page is "physically" half-sized.
         # Comment out next block if you prefer to keep original MediaBox.
